@@ -1,6 +1,11 @@
 #include "eight-puzzle-solver.h"
+#include <thread>
 
 using namespace std;
+using std::chrono::system_clock;
+using std::chrono::duration_cast;
+using std::chrono::duration;
+using std::chrono::steady_clock;
 
 EightPuzzleSolver::EightPuzzleSolver(WINDOW *_window, const string &path):
     total(0),
@@ -8,12 +13,14 @@ EightPuzzleSolver::EightPuzzleSolver(WINDOW *_window, const string &path):
     precentage(0.0d),
     printLine(3),
     range(pair<size_t,size_t>(3,20)),
-    window(_window)
+    window(_window),
+    splitDepth(5)
 {
     outFile.open(path);
-    if(!outFile.is_open()){
+    if(!outFile.is_open()) {
         throw new exception();
     }
+    this->symbols="8+-*/";
 }
 
 EightPuzzleSolver::~EightPuzzleSolver()
@@ -43,18 +50,23 @@ void EightPuzzleSolver::start()
         wprintw(window, "Checking strings of length: %d",length);
         wmove(window, 1, 0);
         wprintw(window, "Total: %.0lf",pow(5.0,length));
-        this->inputs = vector<char>(length,'0');
-        auto begin = inputs.begin();
-        permutation(begin);
+        string input(length,'8');
+        this->startTime = steady_clock::now();
+        permutation(input,0);
     }
+}
+
+void EightPuzzleSolver::setThreadCount(const size_t& count)
+{
+    this->splitDepth = count;
 }
 
 std::vector<string> EightPuzzleSolver::getResults()
 {
-    return this->getResults();
+    return this->results;
 }
 
-bool EightPuzzleSolver::check(const vector<char> &inputs)
+bool EightPuzzleSolver::check(const string &inputs)
 {
     while(!evaluation.empty()) {
         evaluation.pop();
@@ -150,43 +162,55 @@ bool EightPuzzleSolver::check(const vector<char> &inputs)
     return (evaluation.size()==1 && evaluation.top()==1000);
 }
 
-void EightPuzzleSolver::permutation(vector<char>::iterator i)
+void EightPuzzleSolver::permutation(string &input, size_t index)
 {
-    if(i==inputs.end()) {
-        time_t rawtime;
-        struct tm *timeinfo;
-        char time_buffer[80];
-        time (&rawtime);
-        timeinfo = localtime(&rawtime);
-        strftime(time_buffer,80,"%d-%m-%Y %I:%M:%S",timeinfo);
+    if(index==input.size()) {
+        this->guard.lock();
+        steady_clock::time_point now = steady_clock::now();
+        auto ticks = now-this->startTime;
+        auto s = duration_cast<chrono::seconds>(ticks).count()%60;
+        auto m = duration_cast<chrono::minutes>(ticks).count()%60;
+        auto h = duration_cast<chrono::hours>(ticks).count();
+        auto ms = duration_cast<chrono::milliseconds>(ticks).count();
         wmove(window, 2, 0);
         ++current;
         precentage = 100.0*static_cast<double>(current)/total;
-        wprintw(window, "Time: %s, Progress: %d of %.0lf (%.4f%%) sample: %.*s",
-                time_buffer,current,total,precentage,inputs.size(),inputs.data());
+        std::chrono::milliseconds predict(static_cast<int>(100*ms/precentage));
+        wprintw(window, "Elapsed Time: %dh:%dm:%ds, Remaining Time: %04dh:%02dm:%02ds, Progress: %d of %.0lf (%.4f%%) sample: %s",
+                h,m,s,
+                duration_cast<std::chrono::hours>(predict).count(),
+                duration_cast<std::chrono::minutes>(predict).count()%60,
+                duration_cast<std::chrono::seconds>(predict).count()%60,
+                current,total,precentage,input.c_str());
         wrefresh(window);
-        if(!check(inputs)) {
-            sleep(1);
+        if(check(input)) {
             wmove(window, printLine, 0);
-            wprintw(window, "%d: %.*s",results.size()+1,inputs.size(),inputs.data());
-            string PRN{inputs.begin(),inputs.end()};
-            results.push_back(PRN);
-            outFile << PRN << std::endl;
+            wprintw(window, "%d: %s",results.size()+1,input.c_str());
+            results.push_back(input);
+            outFile << input << std::endl;
             wrefresh(window);
             ++printLine;
         }
+        this->guard.unlock();
         return;
     }
+    else if (index == this->splitDepth) {
+        vector<thread> threads;
+        for (char symbol : this->symbols) {
+            input[index] = symbol;
+            threads.emplace_back([=] {
+                string cpy(input);
+                permutation(cpy, index+1);
+            });
+        }
+        for (thread& t: threads) {
+            t.join();
+        }
+    }
     else {
-        *i='8';
-        permutation(i+1);
-        *i='+';
-        permutation(i+1);
-        *i='-';
-        permutation(i+1);
-        *i='*';
-        permutation(i+1);
-        *i='/';
-        permutation(i+1);
+        for (char symbol : this->symbols) {
+            input[index] = symbol;
+            permutation(input, index+1);
+        }
     }
 }

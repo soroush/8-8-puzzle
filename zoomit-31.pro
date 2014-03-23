@@ -4,11 +4,11 @@ CONFIG -= app_bundle
 CONFIG -= qt
 
 SOURCES += main.cpp \
-    eight-puzzle-solvercpp.cpp
+    eight-puzzle-solver.cpp
 
 QMAKE_CXXFLAGS += -std=c++0x -O3
 
-LIBS += -lncurses
+LIBS += -lncurses -lpthread
 
 HEADERS += \
     eight-puzzle-solver.h
